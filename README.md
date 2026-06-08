@@ -1,5 +1,7 @@
 # hand-tracking-experiments
 
+> **▶ Live browser demo: https://ferrolho.github.io/hand-tracking-experiments/** — runs entirely in your browser on your own webcam (MediaPipe + Three.js), no install.
+
 Experiments in monocular hand tracking, aimed at **interactively teleoperating a 3D hand in [viser](https://github.com/nerfstudio-project/viser)** and, eventually, retargeting to a robot hand. Robotics-focused (joint positions over photorealistic mesh), running on an Apple Silicon MacBook Air.
 
 ## Method split
@@ -8,12 +10,12 @@ Two trackers for two jobs, behind one swappable `frame → tracker → 21 keypoi
 
 | | Live teleop | Offline policy data |
 |---|---|---|
-| Tracker | **MediaPipe Hands** | **WiLoR / HaMeR** (planned) |
-| Speed (M2 Air) | ~40 fps ✅ | ~1–3 fps |
+| Tracker | **MediaPipe Hands** | **WiLoR** (via [wilor-mini](https://github.com/warmshao/WiLoR-mini)) |
+| Speed (M2 Air) | ~40 fps ✅ | ~4 fps (measured) |
 | Output | 21 keypoints | full MANO (rotations + mesh) |
 | Why | human closes the loop; latency wins | no human in loop; accuracy + occlusion robustness win |
 
-The live MediaPipe path is implemented in `track_hands.py`. WiLoR/HaMeR can drop into the same viewer later for the offline path.
+The live MediaPipe path is `track_hands.py`. The offline WiLoR path is benchmarked in `bench_wilor.py` and rendered as a mesh-overlay video by `wilor_overlay.py` — see [`docs/wilor.md`](docs/wilor.md) for results (~4 fps, offline-only) and setup notes.
 
 ## Setup
 
@@ -52,9 +54,18 @@ Known limitations (see inline comments in `track_hands.py`):
 - Absolute depth scale is approximate (MediaPipe uses a generic hand model, not your measured hand size).
 - Wrist pixels are not undistorted before back-projection; the camera has notable barrel distortion (k3 ≈ −0.23), so placement error grows toward frame edges. Run `cv2.undistortPoints` for the tight version.
 
+## Browser demo (`web/`)
+
+A static, client-side port of the live path — [MediaPipe Tasks Vision](https://ai.google.dev/edge/mediapipe) (WASM) + [Three.js](https://threejs.org/), no Python or server. Deployed to **GitHub Pages** via Actions on every push to `web/**`.
+
+**▶ https://ferrolho.github.io/hand-tracking-experiments/**
+
+Same on-screen controls as the desktop app (smoothing, selfie mirror, FOV, appearance), and it uses the bundled M2 Air calibration so the skeleton overlays the feed. Run locally with `cd web && python3 -m http.server`, then open the printed URL (camera works on `localhost`).
+
 ## Roadmap
 
 - [x] One-Euro filter to smooth per-frame jitter (`one_euro.py`, tune via `--min-cutoff` / `--beta`)
+- [x] WiLoR offline path — benchmark (`bench_wilor.py`) + mesh-overlay renderer (`wilor_overlay.py`)
+- [x] Browser demo on GitHub Pages (`web/`)
 - [ ] `cv2.undistortPoints` for accurate metric placement
 - [ ] Retarget keypoints → robot hand joint angles (`dex-retargeting`)
-- [ ] WiLoR/HaMeR offline path for policy-learning data
