@@ -242,6 +242,11 @@ def main() -> None:
             hint="Higher = less lag during fast motion. Wave fast and raise until the lag disappears.",
         )
 
+    gui_show_cam = server.gui.add_checkbox(
+        "camera feed", initial_value=args.show_camera,
+        hint="Show the webcam feed as an image plane in the scene.",
+    )
+
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
     landmarker = mp_vision.HandLandmarker.create_from_options(
@@ -259,6 +264,7 @@ def main() -> None:
     frame_count = 0
     timestamp_ms = 0  # must be strictly increasing for VIDEO mode
     filters: dict[str, OneEuroFilter] = {}  # one One-Euro filter per hand, keyed by handedness
+    cam_handle = None  # viser image-plane handle for the camera feed (toggled via GUI)
 
     try:
         while True:
@@ -271,15 +277,18 @@ def main() -> None:
                 continue
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            if args.show_camera:
-                # Camera feed as a 16:9 image plane behind the hands (re-add by name = live update).
+            if gui_show_cam.value:
+                # Camera feed as an image plane behind the hands (re-add by name = live update).
+                # Flip vertically: viser's image plane is y-up, so raw rows arrive upside down.
                 h, w = rgb.shape[:2]
-                disp = cv2.resize(rgb, (640, int(640 * h / w)))
-                server.scene.add_image(
+                disp = cv2.flip(cv2.resize(rgb, (640, int(640 * h / w))), 0)
+                cam_handle = server.scene.add_image(
                     "/camera_feed", disp,
                     render_width=0.64, render_height=0.64 * h / w,
                     position=(0.0, 0.0, -0.6), wxyz=(1.0, 0.0, 0.0, 0.0),
                 )
+            elif cam_handle is not None and cam_handle.visible:
+                cam_handle.visible = False
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             timestamp_ms += max(1, int(frame_interval * 1000))
 
