@@ -46,7 +46,7 @@ Then open <http://localhost:8080>. The printed `infer_fps` is the teleop-relevan
 
 ## Camera calibration
 
-Metric placement uses an existing 1280×720 calibration of the built-in FaceTime HD camera (`--calib`, default is a local config). **Intrinsics are resolution-specific** — capture at 1280×720 to match, or pass `--calib ""` to disable metric placement.
+Metric placement uses the bundled 1280×720 calibration of the built-in FaceTime HD camera (`calib/macbook_air_m2_1280x720.json`, the `--calib` default). **Intrinsics are resolution-specific** — capture at 1280×720 to match, or pass `--calib ""` to disable metric placement.
 
 Known limitations (see inline comments in `track_hands.py`):
 - Absolute depth scale is approximate (MediaPipe uses a generic hand model, not your measured hand size).

@@ -55,8 +55,9 @@ HAND_CONNECTIONS = [
 
 DEFAULT_MODEL = str(Path(__file__).resolve().parent / "hand_landmarker.task")
 
-# Your existing 1280x720 calibration. If present, hands are placed metrically;
-# otherwise they're spread on a plane by image position so they don't overlap.
+# Bundled 1280x720 calibration of the built-in FaceTime HD camera. If present,
+# hands are placed metrically; otherwise they're spread on a plane by image
+# position so they don't overlap.
 DEFAULT_CALIB = str(Path(__file__).resolve().parent / "calib" / "macbook_air_m2_1280x720.json")
 
 # Color keyed by handedness so each hand keeps its color regardless of the other.

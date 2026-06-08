@@ -1,0 +1,30 @@
+{
+  "name": "MacBook Air M2 15\" Built-in Camera (Calibrated)",
+  "resolution": [1280, 720],
+  "fps": 30,
+  "camera_id": 1,
+  "calibration": {
+    "method": "opencv_checkerboard",
+    "calibration_board": "calib.io 9x12 checkerboard (60mm squares, 45mm markers)",
+    "num_images": 20,
+    "reprojection_error_px": 0.067,
+    "date": "2025-01-12",
+    "camera_matrix": [
+      [950.6523369468716, 0.0, 648.1648762306672],
+      [0.0, 949.5324408502435, 365.2777346793164],
+      [0.0, 0.0, 1.0]
+    ],
+    "dist_coeffs": [
+      0.024385675399763176,
+      0.06767420687029281,
+      0.001686330268873148,
+      -0.0011652160472285348,
+      -0.22774669296741595
+    ],
+    "fx": 950.6523369468716,
+    "fy": 949.5324408502435,
+    "cx": 648.1648762306672,
+    "cy": 365.2777346793164
+  },
+  "notes": "Excellent calibration (0.067px error). MacBook has significant barrel distortion (k3=-0.228). Focal length estimates (0.75*width) were very accurate."
+}
