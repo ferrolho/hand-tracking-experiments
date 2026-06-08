@@ -15,16 +15,20 @@ Example
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
-import time
 from pathlib import Path
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
+# wilor-mini emits an INFO line + YOLO summary every frame; keep the console to a progress bar.
+logging.disable(logging.WARNING)
+
 import cv2
 import numpy as np
 import torch
+from tqdm import tqdm
 
 # wilor-mini targets torch<=2.5; restore the permissive torch.load default for its old checkpoints.
 _orig_torch_load = torch.load
@@ -100,6 +104,7 @@ def main() -> None:
     print("loading WiLoR pipeline...")
     from wilor_mini.pipelines.wilor_hand_pose3d_estimation_pipeline import WiLorHandPose3dEstimationPipeline
     pipe = WiLorHandPose3dEstimationPipeline(device=device, dtype=torch.float32)
+    pipe.verbose = False  # silence the per-frame YOLO summary + internal tqdm bars
     faces = pipe.wilor_model.mano.faces
 
     cap = cv2.VideoCapture(str(src))
@@ -113,8 +118,10 @@ def main() -> None:
     writer = open_ffmpeg_writer(out, w, h, fps)
 
     print(f"processing {n_target} frames of {src.name} ({w}x{h}@{fps:.0f}) -> {out.name}")
-    i, n_hands_total, t0 = 0, 0, time.perf_counter()
+    i, n_hands_total = 0, 0
     filters: dict[str, OneEuroFilter] = {}  # one per hand (keyed by handedness) when --smooth
+    # tqdm gives a bar + ETA (the useful number) and a frame/s rate, on one self-updating line.
+    pbar = tqdm(total=n_target, unit="frame", desc="WiLoR overlay", dynamic_ncols=True)
     while i < n_target:
         ok, frame = cap.read()
         if not ok:
@@ -140,13 +147,14 @@ def main() -> None:
             n_hands_total += 1
         writer.stdin.write(np.ascontiguousarray(frame).tobytes())
         i += 1
-        if i % 10 == 0:
-            print(f"  {i}/{n_target}  ({i / (time.perf_counter() - t0):.1f} fps)", flush=True)
+        pbar.update(1)
+        pbar.set_postfix(hands=n_hands_total)
 
+    pbar.close()
     cap.release()
     writer.stdin.close()
     writer.wait()
-    print(f"\ndone: {out}  ({i} frames, {n_hands_total} hand detections)")
+    print(f"done: {out}  ({i} frames, {n_hands_total} hand detections)")
 
 
 if __name__ == "__main__":
