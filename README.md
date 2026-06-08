@@ -54,7 +54,7 @@ Known limitations (see inline comments in `track_hands.py`):
 
 ## Roadmap
 
-- [ ] One-Euro filter to smooth per-frame jitter
+- [x] One-Euro filter to smooth per-frame jitter (`one_euro.py`, tune via `--min-cutoff` / `--beta`)
 - [ ] `cv2.undistortPoints` for accurate metric placement
 - [ ] Retarget keypoints → robot hand joint angles (`dex-retargeting`)
 - [ ] WiLoR/HaMeR offline path for policy-learning data

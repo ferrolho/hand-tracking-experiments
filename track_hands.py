@@ -41,6 +41,8 @@ import viser
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
+from one_euro import OneEuroFilter
+
 # Standard MediaPipe 21-keypoint hand topology (joint index pairs = bones).
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
@@ -79,6 +81,9 @@ def parse_args() -> argparse.Namespace:
         'Pass "" to disable and place hands by image position only.',
     )
     p.add_argument("--max-hands", type=int, default=2, help="Max hands to detect.")
+    p.add_argument("--min-cutoff", type=float, default=1.0, help="One-Euro min cutoff (Hz); lower = smoother, more lag.")
+    p.add_argument("--beta", type=float, default=0.5, help="One-Euro beta; higher = less lag during fast motion.")
+    p.add_argument("--no-filter", action="store_true", help="Disable One-Euro smoothing (show raw keypoints).")
     p.add_argument(
         "--max-speed",
         action="store_true",
@@ -227,6 +232,7 @@ def main() -> None:
     loop_times: deque[float] = deque(maxlen=60)
     frame_count = 0
     timestamp_ms = 0  # must be strictly increasing for VIDEO mode
+    filters: dict[str, OneEuroFilter] = {}  # one One-Euro filter per hand, keyed by handedness
 
     try:
         while True:
@@ -255,12 +261,18 @@ def main() -> None:
                     label = result.handedness[i][0].category_name if result.handedness else f"hand{i}"
                     joints = landmarks_to_xyz(world)
                     joints = joints + hand_offset(result.hand_landmarks[i], joints, img_w, img_h, K)
+                    if not args.no_filter:
+                        filt = filters.get(label)
+                        if filt is None:
+                            filt = filters[label] = OneEuroFilter(min_cutoff=args.min_cutoff, beta=args.beta)
+                        joints = filt(joints, loop_start)
                     draw_hand(server, label, joints)
                     present.add(label)
-            # Clear hands that are no longer detected.
-            for label in ALL_LABELS:
+            # Clear hands that vanished, and drop their filter state so they re-init fresh.
+            for label in set(filters) | set(ALL_LABELS):
                 if label not in present:
                     clear_hand(server, label)
+                    filters.pop(label, None)
 
             frame_count += 1
             if not args.max_speed and frame_interval > 0:
