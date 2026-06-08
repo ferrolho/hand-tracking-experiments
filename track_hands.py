@@ -85,8 +85,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-cutoff", type=float, default=1.0, help="One-Euro min cutoff (Hz); lower = smoother, more lag.")
     p.add_argument("--beta", type=float, default=0.5, help="One-Euro beta; higher = less lag during fast motion.")
     p.add_argument("--no-filter", action="store_true", help="Disable One-Euro smoothing (show raw keypoints).")
-    p.add_argument("--show-camera", action="store_true",
-                   help="Show the live camera feed as an image plane in the viser scene (nice for demos/recording).")
     p.add_argument(
         "--max-speed",
         action="store_true",
@@ -219,11 +217,14 @@ def main() -> None:
     server.scene.set_up_direction("+y")
     print(f"\nviser running -> open http://localhost:{args.port} in a browser\n")
 
+    init_fov_deg = 30.0  # narrow FOV -> flatter, near-orthographic look
+
     @server.on_client_connect
     def _init_view(client) -> None:
         # Start dead-on: viewer on the +z side (where the camera plane faces), looking at the hands.
-        client.camera.position = (0.0, 0.0, 0.6)
-        client.camera.look_at = (0.0, 0.0, -0.5)
+        client.camera.position = (0.0, 0.0, 1.2)
+        client.camera.look_at = (0.0, 0.0, -0.6)
+        client.camera.fov = float(np.deg2rad(init_fov_deg))
 
     # Live filter controls (CLI flags seed the initial values; sliders override at runtime).
     # Detailed tuning guidance lives in per-control hover tooltips to keep the panel compact.
@@ -249,13 +250,22 @@ def main() -> None:
         )
 
     gui_show_cam = server.gui.add_checkbox(
-        "camera feed", initial_value=args.show_camera,
+        "camera feed", initial_value=True,
         hint="Show the webcam feed as an image plane in the scene.",
     )
     gui_mirror = server.gui.add_checkbox(
         "selfie mirror", initial_value=True,
         hint="Mirror the feed and hands horizontally for a natural selfie view.",
     )
+    gui_fov = server.gui.add_slider(
+        "field of view (deg)", min=5, max=90, step=1, initial_value=int(init_fov_deg),
+        hint="Lower = flatter, more orthographic look.",
+    )
+
+    @gui_fov.on_update
+    def _update_fov(_) -> None:
+        for c in server.get_clients().values():
+            c.camera.fov = float(np.deg2rad(gui_fov.value))
 
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
@@ -295,8 +305,8 @@ def main() -> None:
                 disp = cv2.flip(cv2.resize(rgb, (640, int(640 * h / w))), -1 if gui_mirror.value else 0)
                 cam_handle = server.scene.add_image(
                     "/camera_feed", disp,
-                    render_width=0.64, render_height=0.64 * h / w,
-                    position=(0.0, 0.0, -0.6), wxyz=(1.0, 0.0, 0.0, 0.0),
+                    render_width=1.0, render_height=1.0 * h / w,
+                    position=(0.0, 0.0, -1.3), wxyz=(1.0, 0.0, 0.0, 0.0),
                 )
             elif cam_handle is not None and cam_handle.visible:
                 cam_handle.visible = False
