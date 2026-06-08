@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -33,6 +34,19 @@ def _torch_load_compat(*a, **k):  # noqa: E306
 torch.load = _torch_load_compat
 
 BASE_COLOR = np.array([235, 180, 90], dtype=np.float32)  # BGR (warm teal/cyan)
+
+
+def open_ffmpeg_writer(out: Path, w: int, h: int, fps: float) -> subprocess.Popen:
+    """H.264/yuv420p MP4 writer (Twitter/X-ready: +faststart and a silent AAC track)."""
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}", "-r", f"{fps}", "-i", "pipe:0",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-crf", "18",
+        "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart",
+        str(out),
+    ]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
 
 def project(verts3d: np.ndarray, cam_t: np.ndarray, focal: float, center: np.ndarray) -> np.ndarray:
@@ -91,7 +105,7 @@ def main() -> None:
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     n_target = args.frames if args.frames > 0 else total
-    writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    writer = open_ffmpeg_writer(out, w, h, fps)
 
     print(f"processing {n_target} frames of {src.name} ({w}x{h}@{fps:.0f}) -> {out.name}")
     i, n_hands_total, t0 = 0, 0, time.perf_counter()
@@ -108,13 +122,14 @@ def main() -> None:
             focal = float(np.asarray(wp["scaled_focal_length"]).reshape(-1)[0])
             draw_mesh(frame, verts, faces, cam_t, focal)
             n_hands_total += 1
-        writer.write(frame)
+        writer.stdin.write(np.ascontiguousarray(frame).tobytes())
         i += 1
         if i % 10 == 0:
             print(f"  {i}/{n_target}  ({i / (time.perf_counter() - t0):.1f} fps)", flush=True)
 
     cap.release()
-    writer.release()
+    writer.stdin.close()
+    writer.wait()
     print(f"\ndone: {out}  ({i} frames, {n_hands_total} hand detections)")
 
 
