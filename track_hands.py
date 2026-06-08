@@ -219,6 +219,12 @@ def main() -> None:
     server.scene.set_up_direction("+y")
     print(f"\nviser running -> open http://localhost:{args.port} in a browser\n")
 
+    @server.on_client_connect
+    def _init_view(client) -> None:
+        # Start dead-on: viewer on the +z side (where the camera plane faces), looking at the hands.
+        client.camera.position = (0.0, 0.0, 0.6)
+        client.camera.look_at = (0.0, 0.0, -0.5)
+
     # Live filter controls (CLI flags seed the initial values; sliders override at runtime).
     # Detailed tuning guidance lives in per-control hover tooltips to keep the panel compact.
     with server.gui.add_folder("Smoothing (One-Euro)"):
@@ -245,6 +251,10 @@ def main() -> None:
     gui_show_cam = server.gui.add_checkbox(
         "camera feed", initial_value=args.show_camera,
         hint="Show the webcam feed as an image plane in the scene.",
+    )
+    gui_mirror = server.gui.add_checkbox(
+        "selfie mirror", initial_value=True,
+        hint="Mirror the feed and hands horizontally for a natural selfie view.",
     )
 
     if not Path(args.model).exists():
@@ -281,7 +291,8 @@ def main() -> None:
                 # Camera feed as an image plane behind the hands (re-add by name = live update).
                 # Flip vertically: viser's image plane is y-up, so raw rows arrive upside down.
                 h, w = rgb.shape[:2]
-                disp = cv2.flip(cv2.resize(rgb, (640, int(640 * h / w))), 0)
+                # flip vertical (viser plane is y-up); also horizontal when selfie mirror is on.
+                disp = cv2.flip(cv2.resize(rgb, (640, int(640 * h / w))), -1 if gui_mirror.value else 0)
                 cam_handle = server.scene.add_image(
                     "/camera_feed", disp,
                     render_width=0.64, render_height=0.64 * h / w,
@@ -312,6 +323,9 @@ def main() -> None:
                         filt.min_cutoff = gui_min_cutoff.value
                         filt.beta = gui_beta.value
                         joints = filt(joints, loop_start)
+                    if gui_mirror.value:
+                        # New array (don't mutate the filter's stored state in place).
+                        joints = joints * np.array([-1.0, 1.0, 1.0], dtype=np.float32)
                     draw_hand(server, label, joints)
                     present.add(label)
             # Clear hands that vanished, and drop their filter state so they re-init fresh.
