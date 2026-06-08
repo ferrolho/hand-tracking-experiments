@@ -35,7 +35,7 @@ function median(a) {
 const params = {
   smoothing: true, minCutoff: 3.0, beta: 5.0,
   cameraFeed: true, selfieMirror: true, fov: 42,
-  planeDistance: 2.0, jointSize: 0.004, boneWidth: 7.0,
+  planeDistance: 2.0, jointSize: 0.004, boneWidth: 3.5,
   resetView: () => resetView(),
 };
 
@@ -234,6 +234,8 @@ async function init() {
   await video.play();
   vidW = video.videoWidth || 1280;
   vidH = video.videoHeight || 720;
+  const track = stream.getVideoTracks()[0];
+  console.log(`[camera] actual stream: ${vidW}x${vidH}`, track ? track.getSettings() : '');
   fx = CALIB.fxN * vidW; fy = CALIB.fyN * vidW;
   cx = CALIB.cxN * vidW; cy = CALIB.cyN * vidH;
   // Default FOV = the calibrated camera's FOV, so the skeleton overlays the feed dead-on.
