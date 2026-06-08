@@ -1,0 +1,17 @@
+# Model weights — downloaded via scripts/download_models.sh
+*.task
+
+# Recordings / large media — keep the repo light
+data/
+*.mp4
+*.mov
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# macOS
+.DS_Store

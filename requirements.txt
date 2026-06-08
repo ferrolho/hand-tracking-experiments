@@ -1,0 +1,4 @@
+mediapipe>=0.10.35
+viser>=1.0
+opencv-python>=4.10
+numpy>=2.0,<2.3

@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""Real-time hand tracking -> viser, with FPS benchmarking.
+
+One pipeline, swappable frame source:
+  - a recorded video file (offline test / benchmark)
+  - the live webcam (this is your teleop loop)
+
+Tracker is MediaPipe Hands (fast enough for interactive teleop on Apple Silicon).
+It outputs 21 3D keypoints per hand, which we draw in viser as a skeleton
+(spheres for joints, line segments for bones).
+
+The number that decides teleop viability is the printed `infer_fps` -- the rate
+at which the tracker alone can process frames, independent of playback pacing.
+
+Examples
+--------
+    # Benchmark + visualize on a recorded clip (loops the clip)
+    python3 track_hands.py --source ~/Downloads/hand_recording.mp4
+
+    # Run as fast as possible to measure peak tracker throughput
+    python3 track_hands.py --source ~/Downloads/hand_recording.mp4 --max-speed
+
+    # Live teleop from the built-in webcam
+    python3 track_hands.py --source webcam --camera-index 0
+
+Then open the printed viser URL (http://localhost:8080) in a browser.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from collections import deque
+from pathlib import Path
+
+import cv2
+import mediapipe as mp
+import numpy as np
+import viser
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
+
+# Standard MediaPipe 21-keypoint hand topology (joint index pairs = bones).
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),          # index
+    (5, 9), (9, 10), (10, 11), (11, 12),     # middle
+    (9, 13), (13, 14), (14, 15), (15, 16),   # ring
+    (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
+    (0, 17),                                  # palm base
+]
+
+DEFAULT_MODEL = str(Path(__file__).resolve().parent / "hand_landmarker.task")
+
+# Your existing 1280x720 calibration. If present, hands are placed metrically;
+# otherwise they're spread on a plane by image position so they don't overlap.
+DEFAULT_CALIB = str(Path(__file__).resolve().parent / "calib" / "macbook_air_m2_1280x720.json")
+
+# One distinct color per hand so left/right are distinguishable in viser.
+HAND_COLORS = [(80, 170, 255), (255, 140, 80)]  # RGB
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument(
+        "--source",
+        default=str(Path(__file__).resolve().parent / "data" / "hand_recording.mp4"),
+        help='Video file path, or "webcam" for the live camera.',
+    )
+    p.add_argument("--camera-index", type=int, default=0, help="OpenCV camera index when --source webcam.")
+    p.add_argument("--model", default=DEFAULT_MODEL, help="Path to hand_landmarker.task model.")
+    p.add_argument(
+        "--calib",
+        default=DEFAULT_CALIB,
+        help="Camera calibration JSON (for metric hand placement). Must match capture resolution. "
+        'Pass "" to disable and place hands by image position only.',
+    )
+    p.add_argument("--max-hands", type=int, default=2, help="Max hands to detect.")
+    p.add_argument(
+        "--max-speed",
+        action="store_true",
+        help="Process frames as fast as possible (peak-throughput benchmark). "
+        "Default throttles file playback to the source fps so the viser view is watchable.",
+    )
+    p.add_argument("--port", type=int, default=8080, help="viser server port.")
+    return p.parse_args()
+
+
+def open_source(source: str, camera_index: int) -> tuple[cv2.VideoCapture, bool, float]:
+    """Return (capture, is_live, source_fps)."""
+    is_live = source.lower() in {"webcam", "cam", "live"}
+    if is_live:
+        cap = cv2.VideoCapture(camera_index)
+        # NOTE: OpenCV's camera index differs from ffmpeg's avfoundation index.
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    else:
+        path = Path(source).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f"Video not found: {path}")
+        cap = cv2.VideoCapture(str(path))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open source: {source}")
+    return cap, is_live, fps
+
+
+def load_intrinsics(path: str) -> tuple[float, float, float, float] | None:
+    """Read (fx, fy, cx, cy) from the calibration JSON, or None to disable metric placement."""
+    if not path:
+        return None
+    p = Path(path).expanduser()
+    if not p.exists():
+        print(f"[calib] not found -> placing hands by image position only ({p})")
+        return None
+    c = json.loads(p.read_text())["calibration"]
+    print(f"[calib] metric placement using {p.name} (fx={c['fx']:.1f}, cx={c['cx']:.1f})")
+    return c["fx"], c["fy"], c["cx"], c["cy"]
+
+
+def hand_offset(
+    image_landmarks,
+    joints: np.ndarray,
+    img_w: int,
+    img_h: int,
+    K: tuple[float, float, float, float] | None,
+) -> np.ndarray:
+    """Translation to add to the (center-relative) joints so the hand sits where it really is.
+
+    With intrinsics: estimate depth from known metric hand size vs. apparent pixel size
+    (monocular size-based depth), then back-project the wrist pixel to a 3D point.
+    Without intrinsics: just spread hands across a plane by their normalized image position.
+    """
+    u = np.array([lm.x * img_w for lm in image_landmarks], dtype=np.float32)
+    v = np.array([lm.y * img_h for lm in image_landmarks], dtype=np.float32)
+
+    if K is None:
+        target_wrist = np.array(
+            [(image_landmarks[0].x - 0.5) * 0.6, -(image_landmarks[0].y - 0.5) * 0.45, 0.0],
+            dtype=np.float32,
+        )
+    else:
+        fx, fy, cx, cy = K
+        # Z = f * real_size / pixel_size, taken as the median over all bones for robustness.
+        ratios = []
+        for a, b in HAND_CONNECTIONS:
+            pix = float(np.hypot(u[a] - u[b], v[a] - v[b]))
+            if pix > 1.0:
+                ratios.append(fx * float(np.linalg.norm(joints[a] - joints[b])) / pix)
+        z = float(np.median(ratios)) if ratios else 0.5
+        x = (u[0] - cx) * z / fx
+        y = (v[0] - cy) * z / fy
+        target_wrist = np.array([x, -y, -z], dtype=np.float32)  # camera -> viser axis flip
+
+    return target_wrist - joints[0]
+
+
+def landmarks_to_xyz(world_landmarks) -> np.ndarray:
+    """MediaPipe world landmarks (metres, origin at hand center) -> (21, 3) array.
+
+    MediaPipe axes: +x right, +y down, +z toward camera. Flip y and z so the
+    hand sits upright and faces +z in viser's right-handed, y-up-ish scene.
+    """
+    pts = np.array([[lm.x, -lm.y, -lm.z] for lm in world_landmarks], dtype=np.float32)
+    return pts
+
+
+def draw_hand(server: viser.ViserServer, hand_idx: int, joints: np.ndarray) -> None:
+    """(Re)draw one hand's joints and bones. Re-adding with the same name updates it."""
+    color = HAND_COLORS[hand_idx % len(HAND_COLORS)]
+
+    server.scene.add_point_cloud(
+        f"/hand_{hand_idx}/joints",
+        points=joints,
+        colors=np.tile(color, (joints.shape[0], 1)),
+        point_size=0.006,
+        point_shape="circle",
+    )
+
+    segments = np.array([[joints[a], joints[b]] for a, b in HAND_CONNECTIONS], dtype=np.float32)
+    server.scene.add_line_segments(
+        f"/hand_{hand_idx}/bones",
+        points=segments,
+        colors=np.tile(color, (segments.shape[0], 2, 1)),
+        line_width=3.0,
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    cap, is_live, source_fps = open_source(args.source, args.camera_index)
+    frame_interval = 1.0 / source_fps if source_fps > 0 else 0.0
+    K = load_intrinsics(args.calib)
+
+    server = viser.ViserServer(port=args.port)
+    server.scene.set_up_direction("+y")
+    print(f"\nviser running -> open http://localhost:{args.port} in a browser\n")
+
+    if not Path(args.model).exists():
+        raise FileNotFoundError(f"Model not found: {args.model}")
+    landmarker = mp_vision.HandLandmarker.create_from_options(
+        mp_vision.HandLandmarkerOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=args.model),
+            running_mode=mp_vision.RunningMode.VIDEO,
+            num_hands=args.max_hands,
+            min_hand_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+    )
+
+    infer_times: deque[float] = deque(maxlen=60)
+    loop_times: deque[float] = deque(maxlen=60)
+    frame_count = 0
+    timestamp_ms = 0  # must be strictly increasing for VIDEO mode
+
+    try:
+        while True:
+            loop_start = time.perf_counter()
+            ok, frame = cap.read()
+            if not ok:
+                if is_live:
+                    break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop the file
+                continue
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            timestamp_ms += max(1, int(frame_interval * 1000))
+
+            t0 = time.perf_counter()
+            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+            infer_times.append(time.perf_counter() - t0)
+
+            img_h, img_w = frame.shape[:2]
+            present = set()
+            if result.hand_world_landmarks:
+                for i, world in enumerate(result.hand_world_landmarks):
+                    joints = landmarks_to_xyz(world)
+                    joints = joints + hand_offset(result.hand_landmarks[i], joints, img_w, img_h, K)
+                    draw_hand(server, i, joints)
+                    present.add(i)
+            # Remove stale hands that are no longer detected.
+            for i in range(args.max_hands):
+                if i not in present:
+                    server.scene.add_point_cloud(
+                        f"/hand_{i}/joints", points=np.zeros((0, 3), np.float32), colors=np.zeros((0, 3), np.uint8)
+                    )
+                    server.scene.add_line_segments(
+                        f"/hand_{i}/bones", points=np.zeros((0, 2, 3), np.float32), colors=np.zeros((0, 2, 3), np.uint8)
+                    )
+
+            frame_count += 1
+            if not args.max_speed and frame_interval > 0:
+                elapsed = time.perf_counter() - loop_start
+                if elapsed < frame_interval:
+                    time.sleep(frame_interval - elapsed)
+
+            loop_times.append(time.perf_counter() - loop_start)
+            if frame_count % 15 == 0 and infer_times:
+                infer_fps = 1.0 / (sum(infer_times) / len(infer_times))
+                loop_fps = 1.0 / (sum(loop_times) / len(loop_times))
+                n_hands = len(result.hand_world_landmarks or [])
+                print(
+                    f"frame {frame_count:5d} | infer_fps={infer_fps:6.1f} (teleop-relevant) | "
+                    f"loop_fps={loop_fps:6.1f} | hands={n_hands}",
+                    flush=True,
+                )
+    except KeyboardInterrupt:
+        print("\nstopping.")
+    finally:
+        landmarker.close()
+        cap.release()
+
+
+if __name__ == "__main__":
+    main()
