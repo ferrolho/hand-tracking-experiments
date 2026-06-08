@@ -227,9 +227,25 @@ function loop() {
   renderer.render(scene, camera);
 }
 
+async function openCamera() {
+  // Force >=720p 16:9 to match the calibration. Plain {width:1280,height:720} is only a
+  // hint and many cameras default to 640x480 (4:3); a `min` constraint makes it mandatory.
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: { width: { min: 1280, ideal: 1280 }, height: { min: 720, ideal: 720 }, facingMode: 'user' },
+      audio: false,
+    });
+  } catch (e) {
+    console.warn('[camera] >=720p unavailable, falling back:', e.name);
+    return await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false,
+    });
+  }
+}
+
 async function init() {
   statusEl.textContent = 'Requesting camera…';
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+  const stream = await openCamera();
   video.srcObject = stream;
   await video.play();
   vidW = video.videoWidth || 1280;
