@@ -62,6 +62,10 @@ A static, client-side port of the live path — [MediaPipe Tasks Vision](https:/
 
 Same on-screen controls as the desktop app (smoothing, selfie mirror, FOV, appearance), and it uses the bundled M2 Air calibration so the skeleton overlays the feed. Run locally with `cd web && python3 -m http.server`, then open the printed URL (camera works on `localhost`).
 
+## Licensing
+
+MediaPipe's model is openly redistributable; **MANO** is non-commercial **and non-transferable**, and **WiLoR** is CC-BY-NC. That's *why* the browser demo is MediaPipe-only (a web app would re-serve MANO to every visitor) and WiLoR runs **locally only** (the model stays on your machine). Details + reasoning in [`docs/licensing.md`](docs/licensing.md). `MANO_RIGHT.pkl` is gitignored — download it per user from <https://mano.is.tue.mpg.de>.
+
 ## Roadmap
 
 - [x] One-Euro filter to smooth per-frame jitter (`one_euro.py`, tune via `--min-cutoff` / `--beta`)
