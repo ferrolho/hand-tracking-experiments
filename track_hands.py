@@ -224,6 +224,11 @@ def main() -> None:
             "min_cutoff (Hz)", min=0.1, max=5.0, step=0.05, initial_value=args.min_cutoff
         )
         gui_beta = server.gui.add_slider("beta", min=0.0, max=5.0, step=0.05, initial_value=args.beta)
+        server.gui.add_markdown(
+            "**Tuning:** enable, then hold your hand still and lower `min_cutoff` until the "
+            "jitter is gone. Then wave fast and raise `beta` until the lag disappears. "
+            "Bake the values you like in as the CLI defaults (`--min-cutoff`, `--beta`)."
+        )
 
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
