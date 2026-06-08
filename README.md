@@ -15,7 +15,7 @@ Two trackers for two jobs, behind one swappable `frame → tracker → 21 keypoi
 | Output | 21 keypoints | full MANO (rotations + mesh) |
 | Why | human closes the loop; latency wins | no human in loop; accuracy + occlusion robustness win |
 
-The live MediaPipe path is `track_hands.py`. The offline WiLoR path is benchmarked in `bench_wilor.py` and rendered as a mesh-overlay video by `wilor_overlay.py` — see [`docs/wilor.md`](docs/wilor.md) for results (~4 fps, offline-only) and setup notes.
+The live MediaPipe path is `track_hands.py`. The offline WiLoR path has three entry points — `bench_wilor.py` (speed), `wilor_overlay.py` (render a mesh-overlay video), and `wilor_live.py` (live local webcam window) — see [`docs/wilor.md`](docs/wilor.md) for results (~4 fps, offline-only) and setup (`scripts/setup_wilor.sh`). Tip: WiLoR assumes a weak-perspective camera, so hold your hand a bit **farther from the camera** for the tightest overlay.
 
 ## Setup
 

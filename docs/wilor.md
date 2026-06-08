@@ -32,5 +32,9 @@ A dedicated **micromamba/conda env: Python 3.10 + torch ≤2.5 + numpy <2 + ultr
 ## Reproduce
 
 ```bash
-python3 bench_wilor.py --source data/hand_recording.mp4 --device mps --frames 40
+python3 bench_wilor.py  --source data/hand_recording.mp4 --device mps --frames 40   # speed
+python3 wilor_overlay.py --source data/hand_recording.mp4                            # render mesh-overlay video
+python3 wilor_live.py                                                                # live webcam window (local)
 ```
+
+**Tip:** WiLoR assumes a weak-perspective (near-orthographic) camera, so the mesh overlays best when your hand is a bit **farther from the camera** — up close, perspective foreshortening makes it drift off the hand.
