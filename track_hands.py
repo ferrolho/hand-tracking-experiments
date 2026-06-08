@@ -216,6 +216,14 @@ def main() -> None:
     server.scene.set_up_direction("+y")
     print(f"\nviser running -> open http://localhost:{args.port} in a browser\n")
 
+    # Live filter controls (CLI flags seed the initial values; sliders override at runtime).
+    with server.gui.add_folder("Smoothing (One-Euro)"):
+        gui_enable = server.gui.add_checkbox("enabled", initial_value=not args.no_filter)
+        gui_min_cutoff = server.gui.add_slider(
+            "min_cutoff (Hz)", min=0.1, max=5.0, step=0.05, initial_value=args.min_cutoff
+        )
+        gui_beta = server.gui.add_slider("beta", min=0.0, max=5.0, step=0.05, initial_value=args.beta)
+
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
     landmarker = mp_vision.HandLandmarker.create_from_options(
@@ -261,10 +269,12 @@ def main() -> None:
                     label = result.handedness[i][0].category_name if result.handedness else f"hand{i}"
                     joints = landmarks_to_xyz(world)
                     joints = joints + hand_offset(result.hand_landmarks[i], joints, img_w, img_h, K)
-                    if not args.no_filter:
+                    if gui_enable.value:
                         filt = filters.get(label)
                         if filt is None:
-                            filt = filters[label] = OneEuroFilter(min_cutoff=args.min_cutoff, beta=args.beta)
+                            filt = filters[label] = OneEuroFilter()
+                        filt.min_cutoff = gui_min_cutoff.value
+                        filt.beta = gui_beta.value
                         joints = filt(joints, loop_start)
                     draw_hand(server, label, joints)
                     present.add(label)
