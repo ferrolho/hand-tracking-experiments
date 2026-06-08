@@ -85,6 +85,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-cutoff", type=float, default=1.0, help="One-Euro min cutoff (Hz); lower = smoother, more lag.")
     p.add_argument("--beta", type=float, default=0.5, help="One-Euro beta; higher = less lag during fast motion.")
     p.add_argument("--no-filter", action="store_true", help="Disable One-Euro smoothing (show raw keypoints).")
+    p.add_argument("--show-camera", action="store_true",
+                   help="Show the live camera feed as an image plane in the viser scene (nice for demos/recording).")
     p.add_argument(
         "--max-speed",
         action="store_true",
@@ -269,6 +271,15 @@ def main() -> None:
                 continue
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if args.show_camera:
+                # Camera feed as a 16:9 image plane behind the hands (re-add by name = live update).
+                h, w = rgb.shape[:2]
+                disp = cv2.resize(rgb, (640, int(640 * h / w)))
+                server.scene.add_image(
+                    "/camera_feed", disp,
+                    render_width=0.64, render_height=0.64 * h / w,
+                    position=(0.0, 0.0, -0.6), wxyz=(1.0, 0.0, 0.0, 0.0),
+                )
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             timestamp_ms += max(1, int(frame_interval * 1000))
 
