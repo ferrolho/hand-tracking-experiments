@@ -218,17 +218,28 @@ def main() -> None:
     print(f"\nviser running -> open http://localhost:{args.port} in a browser\n")
 
     # Live filter controls (CLI flags seed the initial values; sliders override at runtime).
+    # Detailed tuning guidance lives in per-control hover tooltips to keep the panel compact.
     with server.gui.add_folder("Smoothing (One-Euro)"):
-        gui_enable = server.gui.add_checkbox("enabled", initial_value=not args.no_filter)
+        gui_enable = server.gui.add_checkbox(
+            "enabled", initial_value=not args.no_filter, hint="Toggle One-Euro smoothing on/off."
+        )
         gui_min_cutoff = server.gui.add_slider(
-            "min_cutoff (Hz)", min=0.1, max=5.0, step=0.05, initial_value=args.min_cutoff
+            "min_cutoff (Hz)",
+            min=0.1,
+            max=5.0,
+            step=0.05,
+            initial_value=args.min_cutoff,
+            hint="Lower = smoother at rest but more lag. Hold your hand still and lower until the jitter is gone.",
         )
-        gui_beta = server.gui.add_slider("beta", min=0.0, max=5.0, step=0.05, initial_value=args.beta)
-        server.gui.add_markdown(
-            "**Tuning:** enable, then hold your hand still and lower `min_cutoff` until the "
-            "jitter is gone. Then wave fast and raise `beta` until the lag disappears. "
-            "Bake the values you like in as the CLI defaults (`--min-cutoff`, `--beta`)."
+        gui_beta = server.gui.add_slider(
+            "beta",
+            min=0.0,
+            max=5.0,
+            step=0.05,
+            initial_value=args.beta,
+            hint="Higher = less lag during fast motion. Wave fast and raise until the lag disappears.",
         )
+        server.gui.add_markdown("_Bake good values in as `--min-cutoff` / `--beta`._")
 
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
