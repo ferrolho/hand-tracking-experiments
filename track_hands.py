@@ -239,7 +239,6 @@ def main() -> None:
             initial_value=args.beta,
             hint="Higher = less lag during fast motion. Wave fast and raise until the lag disappears.",
         )
-        server.gui.add_markdown("_Bake good values in as `--min-cutoff` / `--beta`._")
 
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
