@@ -176,7 +176,8 @@ def landmarks_to_xyz(world_landmarks) -> np.ndarray:
     return pts
 
 
-def draw_hand(server: viser.ViserServer, label: str, joints: np.ndarray) -> None:
+def draw_hand(server: viser.ViserServer, label: str, joints: np.ndarray,
+              point_size: float, line_width: float) -> None:
     """(Re)draw one hand's joints and bones, keyed by handedness label (stable name)."""
     color = HAND_COLORS.get(label, DEFAULT_COLOR)
 
@@ -184,7 +185,7 @@ def draw_hand(server: viser.ViserServer, label: str, joints: np.ndarray) -> None
         f"/hand_{label}/joints",
         points=joints,
         colors=np.tile(color, (joints.shape[0], 1)),
-        point_size=0.006,
+        point_size=point_size,
         point_shape="circle",
     )
 
@@ -193,7 +194,7 @@ def draw_hand(server: viser.ViserServer, label: str, joints: np.ndarray) -> None
         f"/hand_{label}/bones",
         points=segments,
         colors=np.tile(color, (segments.shape[0], 2, 1)),
-        line_width=3.0,
+        line_width=line_width,
     )
 
 
@@ -267,6 +268,21 @@ def main() -> None:
         for c in server.get_clients().values():
             c.camera.fov = float(np.deg2rad(gui_fov.value))
 
+    with server.gui.add_folder("Appearance"):
+        gui_plane_z = server.gui.add_slider(
+            "camera plane distance", min=-3.0, max=0.0, step=0.05, initial_value=-1.3,
+            hint="Push the webcam plane further back so reaching hands don't clip it.",
+        )
+        gui_plane_w = server.gui.add_slider(
+            "camera plane size (m)", min=0.3, max=3.0, step=0.05, initial_value=1.0,
+        )
+        gui_joint = server.gui.add_slider(
+            "joint size", min=0.002, max=0.02, step=0.001, initial_value=0.006,
+        )
+        gui_bone = server.gui.add_slider(
+            "bone width", min=1.0, max=10.0, step=0.5, initial_value=3.0,
+        )
+
     if not Path(args.model).exists():
         raise FileNotFoundError(f"Model not found: {args.model}")
     landmarker = mp_vision.HandLandmarker.create_from_options(
@@ -305,8 +321,8 @@ def main() -> None:
                 disp = cv2.flip(cv2.resize(rgb, (640, int(640 * h / w))), -1 if gui_mirror.value else 0)
                 cam_handle = server.scene.add_image(
                     "/camera_feed", disp,
-                    render_width=1.0, render_height=1.0 * h / w,
-                    position=(0.0, 0.0, -1.3), wxyz=(1.0, 0.0, 0.0, 0.0),
+                    render_width=gui_plane_w.value, render_height=gui_plane_w.value * h / w,
+                    position=(0.0, 0.0, gui_plane_z.value), wxyz=(1.0, 0.0, 0.0, 0.0),
                 )
             elif cam_handle is not None and cam_handle.visible:
                 cam_handle.visible = False
@@ -336,7 +352,7 @@ def main() -> None:
                     if gui_mirror.value:
                         # New array (don't mutate the filter's stored state in place).
                         joints = joints * np.array([-1.0, 1.0, 1.0], dtype=np.float32)
-                    draw_hand(server, label, joints)
+                    draw_hand(server, label, joints, gui_joint.value, gui_bone.value)
                     present.add(label)
             # Clear hands that vanished, and drop their filter state so they re-init fresh.
             for label in set(filters) | set(ALL_LABELS):
