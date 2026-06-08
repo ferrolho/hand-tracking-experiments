@@ -116,17 +116,19 @@ def open_source(source: str, camera_index: int) -> tuple[cv2.VideoCapture, bool,
     return cap, is_live, fps
 
 
-def load_intrinsics(path: str) -> tuple[float, float, float, float] | None:
-    """Read (fx, fy, cx, cy) from the calibration JSON, or None to disable metric placement."""
+def load_intrinsics(path: str):
+    """Return ((fx, fy, cx, cy), (W, H)) from the calibration JSON, or (None, None)."""
     if not path:
-        return None
+        return None, None
     p = Path(path).expanduser()
     if not p.exists():
         print(f"[calib] not found -> placing hands by image position only ({p})")
-        return None
-    c = json.loads(p.read_text())["calibration"]
-    print(f"[calib] metric placement using {p.name} (fx={c['fx']:.1f}, cx={c['cx']:.1f})")
-    return c["fx"], c["fy"], c["cx"], c["cy"]
+        return None, None
+    data = json.loads(p.read_text())
+    c = data["calibration"]
+    res = data.get("resolution", [1280, 720])
+    print(f"[calib] metric placement using {p.name} (fx={c['fx']:.1f}, cx={c['cx']:.1f}, res={res[0]}x{res[1]})")
+    return (c["fx"], c["fy"], c["cx"], c["cy"]), (int(res[0]), int(res[1]))
 
 
 def hand_offset(
@@ -212,20 +214,24 @@ def main() -> None:
     args = parse_args()
     cap, is_live, source_fps = open_source(args.source, args.camera_index)
     frame_interval = 1.0 / source_fps if source_fps > 0 else 0.0
-    K = load_intrinsics(args.calib)
+    K, calib_res = load_intrinsics(args.calib)
+    # Vertical FOV that reproduces the real camera (so the skeleton overlays the feed dead-on).
+    if K is not None:
+        init_fov_deg = float(np.degrees(2.0 * np.arctan((calib_res[1] / 2.0) / K[1])))
+    else:
+        init_fov_deg = 45.0
 
     server = viser.ViserServer(port=args.port)
     server.scene.set_up_direction("+y")
     print(f"\nviser running -> open http://localhost:{args.port} in a browser\n")
 
-    init_fov_deg = 30.0  # narrow FOV -> flatter, near-orthographic look
-
     @server.on_client_connect
     def _init_view(client) -> None:
-        # Start dead-on: viewer on the +z side (where the camera plane faces), looking at the hands.
-        client.camera.position = (0.0, 0.0, 1.2)
-        client.camera.look_at = (0.0, 0.0, -0.6)
-        client.camera.fov = float(np.deg2rad(init_fov_deg))
+        # Reproduce the real camera: viewport AT the optical center (origin), looking down -z,
+        # with the calibrated FOV. From here the metric skeleton overlays the feed; orbit to see 3D.
+        client.camera.position = (0.0, 0.0, 0.0)
+        client.camera.look_at = (0.0, 0.0, -1.0)
+        client.camera.fov = float(np.deg2rad(gui_fov.value))
 
     # Live filter controls (CLI flags seed the initial values; sliders override at runtime).
     # Detailed tuning guidance lives in per-control hover tooltips to keep the panel compact.
@@ -259,8 +265,8 @@ def main() -> None:
         hint="Mirror the feed and hands horizontally for a natural selfie view.",
     )
     gui_fov = server.gui.add_slider(
-        "field of view (deg)", min=5, max=90, step=1, initial_value=int(init_fov_deg),
-        hint="Lower = flatter, more orthographic look.",
+        "field of view (deg)", min=5, max=90, step=1, initial_value=int(round(init_fov_deg)),
+        hint="Default = calibrated camera FOV (skeleton overlays the feed). Lower to zoom/flatten.",
     )
 
     @gui_fov.on_update
@@ -270,11 +276,9 @@ def main() -> None:
 
     with server.gui.add_folder("Appearance"):
         gui_plane_z = server.gui.add_slider(
-            "camera plane distance", min=-3.0, max=0.0, step=0.05, initial_value=-1.3,
-            hint="Push the webcam plane further back so reaching hands don't clip it.",
-        )
-        gui_plane_w = server.gui.add_slider(
-            "camera plane size (m)", min=0.3, max=3.0, step=0.05, initial_value=1.0,
+            "camera plane distance", min=-3.0, max=-0.2, step=0.05, initial_value=-1.0,
+            hint="Distance of the feed plane in front of the camera. Its size auto-scales from "
+                 "calibration to fill the frustum, so the skeleton stays overlaid at any distance.",
         )
         gui_joint = server.gui.add_slider(
             "joint size", min=0.002, max=0.02, step=0.001, initial_value=0.006,
@@ -319,10 +323,21 @@ def main() -> None:
                 h, w = rgb.shape[:2]
                 # flip vertical (viser plane is y-up); also horizontal when selfie mirror is on.
                 disp = cv2.flip(cv2.resize(rgb, (640, int(640 * h / w))), -1 if gui_mirror.value else 0)
+                d = -gui_plane_z.value
+                if K is not None:
+                    fx, fy, cx, cy = K
+                    cw, ch = calib_res
+                    rw, rh = d * cw / fx, d * ch / fy          # fill calibrated frustum at depth d
+                    px = (cw / 2.0 - cx) * d / fx               # principal-point offset
+                    py = -(ch / 2.0 - cy) * d / fy
+                    if gui_mirror.value:
+                        px = -px
+                    pos = (px, py, gui_plane_z.value)
+                else:
+                    rw, rh, pos = 1.0, 1.0 * h / w, (0.0, 0.0, gui_plane_z.value)
                 cam_handle = server.scene.add_image(
                     "/camera_feed", disp,
-                    render_width=gui_plane_w.value, render_height=gui_plane_w.value * h / w,
-                    position=(0.0, 0.0, gui_plane_z.value), wxyz=(1.0, 0.0, 0.0, 0.0),
+                    render_width=rw, render_height=rh, position=pos, wxyz=(1.0, 0.0, 0.0, 0.0),
                 )
             elif cam_handle is not None and cam_handle.visible:
                 cam_handle.visible = False
