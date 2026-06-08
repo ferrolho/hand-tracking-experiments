@@ -1,6 +1,10 @@
 # Model weights — downloaded via scripts/download_models.sh
 *.task
 
+# MANO model — license-gated (mano.is.tue.mpg.de), must NOT be committed/redistributed
+mano_data/
+*.pkl
+
 # Recordings / large media — keep the repo light
 data/
 *.mp4
