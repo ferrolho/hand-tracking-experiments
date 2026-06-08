@@ -11,7 +11,11 @@ Quick experiment: how slow is WiLoR (SOTA hand mesh reconstruction) on the M2 Ai
 
 ~10× slower than MediaPipe → **offline use only** (policy-data generation, accuracy reference); not viable for interactive teleop on this hardware. Per-frame cost ≈ YOLO detect ~25 ms + ViT reconstruction ~200 ms. Hand detected in 40/40 frames of the test clip.
 
-## Setup hacks (running on the pyenv 3.13 env)
+## Setup
+
+Run **`scripts/setup_wilor.sh`** (from the repo root, with your venv active) — it encodes every step below. Then place `MANO_RIGHT.pkl` in `mano_data/` (license-gated; see [`licensing.md`](licensing.md)).
+
+### What the script does (the hacks, for reference)
 
 [wilor-mini](https://github.com/warmshao/WiLoR-mini) targets torch ≤2.5 / older Python; on pyenv 3.13 + torch 2.11 + numpy 2 it needed:
 

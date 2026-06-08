@@ -1,0 +1,17 @@
+# Dependencies for the WiLoR offline path (bench_wilor.py / wilor_overlay.py / wilor_live.py).
+#
+# Run scripts/setup_wilor.sh instead of `pip install -r` directly — it installs these PLUS the
+# two packages that need special handling on modern Python/torch:
+#   - wilor-mini  (installed --no-deps; its torch<=2.5 pin conflicts with current torch)
+#   - chumpy      (sdist patched to build on Python 3.11+ / numpy 2)
+#
+# Also requires MANO_RIGHT.pkl in mano_data/ — license-gated, NOT redistributable (see docs/licensing.md).
+smplx==0.1.28
+timm
+einops
+ultralytics==8.1.34
+scikit-image
+roma
+huggingface_hub
+opencv-python
+tqdm
