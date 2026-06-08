@@ -33,6 +33,8 @@ def _torch_load_compat(*a, **k):  # noqa: E306
     return _orig_torch_load(*a, **k)
 torch.load = _torch_load_compat
 
+from one_euro import OneEuroFilter
+
 BASE_COLOR = np.array([235, 180, 90], dtype=np.float32)  # BGR (warm teal/cyan)
 
 
@@ -86,6 +88,9 @@ def main() -> None:
     p.add_argument("--out", default="", help="Output mp4 path (default: <source>_wilor.mp4).")
     p.add_argument("--frames", type=int, default=0, help="Limit frames (0 = whole clip).")
     p.add_argument("--device", default="mps", choices=["mps", "cpu"])
+    p.add_argument("--smooth", action="store_true", help="One-Euro temporal smoothing of the mesh (reduces jitter).")
+    p.add_argument("--min-cutoff", type=float, default=1.0, help="One-Euro min cutoff (lower = smoother, more lag).")
+    p.add_argument("--beta", type=float, default=0.5, help="One-Euro beta (higher = less lag on fast motion).")
     args = p.parse_args()
 
     src = Path(args.source).expanduser()
@@ -109,18 +114,29 @@ def main() -> None:
 
     print(f"processing {n_target} frames of {src.name} ({w}x{h}@{fps:.0f}) -> {out.name}")
     i, n_hands_total, t0 = 0, 0, time.perf_counter()
+    filters: dict[str, OneEuroFilter] = {}  # one per hand (keyed by handedness) when --smooth
     while i < n_target:
         ok, frame = cap.read()
         if not ok:
             break
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         outputs = pipe.predict(rgb)
+        t_now = i / fps  # video time, for the One-Euro filter
         for o in outputs:
             wp = o["wilor_preds"]
             verts = np.asarray(wp["pred_vertices"][0], dtype=np.float32)
             cam_t = np.asarray(wp["pred_cam_t_full"][0], dtype=np.float32)
             focal = float(np.asarray(wp["scaled_focal_length"]).reshape(-1)[0])
-            draw_mesh(frame, verts, faces, cam_t, focal)
+            if args.smooth:
+                label = "right" if o.get("is_right", 1) else "left"
+                filt = filters.get(label)
+                if filt is None:
+                    filt = filters[label] = OneEuroFilter(min_cutoff=args.min_cutoff, beta=args.beta)
+                # Smooth the full camera-space mesh (pose + global translation) at once.
+                p_cam = filt(verts + cam_t, t_now)
+                draw_mesh(frame, p_cam, faces, np.zeros(3, dtype=np.float32), focal)
+            else:
+                draw_mesh(frame, verts, faces, cam_t, focal)
             n_hands_total += 1
         writer.stdin.write(np.ascontiguousarray(frame).tobytes())
         i += 1
