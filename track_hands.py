@@ -57,8 +57,10 @@ DEFAULT_MODEL = str(Path(__file__).resolve().parent / "hand_landmarker.task")
 # otherwise they're spread on a plane by image position so they don't overlap.
 DEFAULT_CALIB = str(Path(__file__).resolve().parent / "calib" / "macbook_air_m2_1280x720.json")
 
-# One distinct color per hand so left/right are distinguishable in viser.
-HAND_COLORS = [(80, 170, 255), (255, 140, 80)]  # RGB
+# Color keyed by handedness so each hand keeps its color regardless of the other.
+HAND_COLORS = {"Right": (80, 170, 255), "Left": (255, 140, 80)}  # RGB
+DEFAULT_COLOR = (180, 180, 180)  # fallback if handedness is somehow unknown
+ALL_LABELS = ("Left", "Right")
 
 
 def parse_args() -> argparse.Namespace:
@@ -168,12 +170,12 @@ def landmarks_to_xyz(world_landmarks) -> np.ndarray:
     return pts
 
 
-def draw_hand(server: viser.ViserServer, hand_idx: int, joints: np.ndarray) -> None:
-    """(Re)draw one hand's joints and bones. Re-adding with the same name updates it."""
-    color = HAND_COLORS[hand_idx % len(HAND_COLORS)]
+def draw_hand(server: viser.ViserServer, label: str, joints: np.ndarray) -> None:
+    """(Re)draw one hand's joints and bones, keyed by handedness label (stable name)."""
+    color = HAND_COLORS.get(label, DEFAULT_COLOR)
 
     server.scene.add_point_cloud(
-        f"/hand_{hand_idx}/joints",
+        f"/hand_{label}/joints",
         points=joints,
         colors=np.tile(color, (joints.shape[0], 1)),
         point_size=0.006,
@@ -182,10 +184,20 @@ def draw_hand(server: viser.ViserServer, hand_idx: int, joints: np.ndarray) -> N
 
     segments = np.array([[joints[a], joints[b]] for a, b in HAND_CONNECTIONS], dtype=np.float32)
     server.scene.add_line_segments(
-        f"/hand_{hand_idx}/bones",
+        f"/hand_{label}/bones",
         points=segments,
         colors=np.tile(color, (segments.shape[0], 2, 1)),
         line_width=3.0,
+    )
+
+
+def clear_hand(server: viser.ViserServer, label: str) -> None:
+    """Hide a hand that is no longer detected by emptying its scene nodes."""
+    server.scene.add_point_cloud(
+        f"/hand_{label}/joints", points=np.zeros((0, 3), np.float32), colors=np.zeros((0, 3), np.uint8)
+    )
+    server.scene.add_line_segments(
+        f"/hand_{label}/bones", points=np.zeros((0, 2, 3), np.float32), colors=np.zeros((0, 2, 3), np.uint8)
     )
 
 
@@ -238,19 +250,17 @@ def main() -> None:
             present = set()
             if result.hand_world_landmarks:
                 for i, world in enumerate(result.hand_world_landmarks):
+                    # Handedness drives both color and viser node name, so a hand keeps
+                    # its identity whether or not the other hand is on screen.
+                    label = result.handedness[i][0].category_name if result.handedness else f"hand{i}"
                     joints = landmarks_to_xyz(world)
                     joints = joints + hand_offset(result.hand_landmarks[i], joints, img_w, img_h, K)
-                    draw_hand(server, i, joints)
-                    present.add(i)
-            # Remove stale hands that are no longer detected.
-            for i in range(args.max_hands):
-                if i not in present:
-                    server.scene.add_point_cloud(
-                        f"/hand_{i}/joints", points=np.zeros((0, 3), np.float32), colors=np.zeros((0, 3), np.uint8)
-                    )
-                    server.scene.add_line_segments(
-                        f"/hand_{i}/bones", points=np.zeros((0, 2, 3), np.float32), colors=np.zeros((0, 2, 3), np.uint8)
-                    )
+                    draw_hand(server, label, joints)
+                    present.add(label)
+            # Clear hands that are no longer detected.
+            for label in ALL_LABELS:
+                if label not in present:
+                    clear_hand(server, label)
 
             frame_count += 1
             if not args.max_speed and frame_interval > 0:
